@@ -1,15 +1,14 @@
 package controllers
 
 import (
-	"fmt"
+	"github.com/gin-gonic/gin"
+	"strconv"
 	"symphoney/config"
 	"symphoney/models"
-
-	"github.com/gin-gonic/gin"
 )
 
 func CreateProduct(c *gin.Context) {
-	fmt.Println("------------")
+
 	var product models.Product
 
 	if err := c.ShouldBindJSON(&product); err != nil {
@@ -76,10 +75,26 @@ func GetProducts(c *gin.Context) {
 			continue
 		}
 
+		imageRows, _ := config.DB.Query(`
+		SELECT image_url
+		FROM product_images
+		WHERE product_id=$1
+		`, product.ID)
+
+		var images []string
+
+		for imageRows.Next() {
+			var url string
+			imageRows.Scan(&url)
+			images = append(images, url)
+		}
+		product.Images = images
 		products = append(products, product)
 	}
 
-	c.JSON(200, gin.H{"data": products})
+	c.JSON(200, gin.H{
+		"data": products,
+	})
 }
 
 func UpdateProduct(c *gin.Context) {
@@ -92,7 +107,6 @@ func UpdateProduct(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "Invalid input"})
 		return
 	}
-
 	query := `
 	UPDATE products
 	SET name=$1,description=$2,price=$3,category_id=$4,stock=$5
@@ -167,7 +181,13 @@ func GetProductByID(c *gin.Context) {
 
 func AddProductImage(c *gin.Context) {
 
-	productID := c.Param("id")
+	idParam := c.Param("id")
+
+	productID, err := strconv.Atoi(idParam)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "Invalid product id"})
+		return
+	}
 
 	var image models.ProductImage
 
@@ -182,16 +202,20 @@ func AddProductImage(c *gin.Context) {
 	RETURNING id
 	`
 
-	err := config.DB.QueryRow(
+	err = config.DB.QueryRow(
 		query,
 		productID,
 		image.ImageURL,
 	).Scan(&image.ID)
 
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to add image"})
+		c.JSON(500, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
+
+	image.ProductID = productID
 
 	c.JSON(201, gin.H{
 		"message": "Image added",
