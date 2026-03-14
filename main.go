@@ -12,5 +12,6 @@ func main() {
 	routes.UserRoutes(r)
 	routes.CategoryRoutes(r)
 	routes.ProductRoutes(r)
+	routes.CartRoutes(r)
 	r.Run(":8080")
 }
