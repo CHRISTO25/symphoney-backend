@@ -13,15 +13,9 @@ func ProductRoutes(r *gin.Engine) {
 	protected.Use(middleware.AuthMiddleware())
 
 	protected.POST("/", controllers.CreateProduct)
-
 	protected.GET("/", controllers.GetProducts)
-
 	protected.GET("/:id", controllers.GetProductByID)
-
 	protected.PUT("/:id", controllers.UpdateProduct)
-
 	protected.DELETE("/:id", controllers.DeleteProduct)
-
 	protected.POST("/:id/images", controllers.AddProductImage)
-
 }

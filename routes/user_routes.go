@@ -12,4 +12,8 @@ func UserRoutes(r *gin.Engine) {
 	protected := r.Group("/profile")
 	protected.Use(middleware.AuthMiddleware())
 	protected.GET("/", controllers.Profile)
+
+	protected.GET("/users", controllers.GetAllUsers)
+	protected.PUT("/users/block/:id", controllers.BlockUser)
+	protected.PUT("/users/unblock/:id", controllers.UnblockUser)
 }

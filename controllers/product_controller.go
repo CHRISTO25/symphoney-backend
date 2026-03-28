@@ -1,59 +1,56 @@
 package controllers
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
+	"path/filepath"
 	"strconv"
 	"symphoney/config"
 	"symphoney/models"
+	"time"
 )
 
-func CreateProduct(c *gin.Context) {
-
-	var product models.Product
-
-	if err := c.ShouldBindJSON(&product); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid input"})
-		return
-	}
-
-	query := `
-	INSERT INTO products (name,description,price,category_id,stock)
-	VALUES ($1,$2,$3,$4,$5)
-	RETURNING id
-	`
-
-	err := config.DB.QueryRow(
-		query,
-		product.Name,
-		product.Description,
-		product.Price,
-		product.CategoryID,
-		product.Stock,
-	).Scan(&product.ID)
-
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to create product"})
-		return
-	}
-
-	c.JSON(201, gin.H{
-		"message": "Product created",
-		"data":    product,
-	})
-}
-
+// ✅ GET ALL PRODUCTS
 func GetProducts(c *gin.Context) {
 
-	rows, err := config.DB.Query(`
+	search := c.Query("search")
+	categoryID := c.Query("category_id")
+	page := c.DefaultQuery("page", "1")
+
+	limit := 10
+	pageInt, _ := strconv.Atoi(page)
+	offset := (pageInt - 1) * limit
+
+	query := `
 	SELECT id,name,description,price,category_id,stock
 	FROM products
-	`)
+	WHERE 1=1
+	`
 
+	args := []interface{}{}
+	argID := 1
+
+	if search != "" {
+		query += " AND name ILIKE $" + strconv.Itoa(argID)
+		args = append(args, "%"+search+"%")
+		argID++
+	}
+
+	if categoryID != "" {
+		query += " AND category_id = $" + strconv.Itoa(argID)
+		args = append(args, categoryID)
+		argID++
+	}
+
+	query += " ORDER BY id LIMIT $" + strconv.Itoa(argID) + " OFFSET $" + strconv.Itoa(argID+1)
+
+	args = append(args, limit, offset)
+
+	rows, err := config.DB.Query(query, args...)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to fetch products"})
 		return
 	}
-
 	defer rows.Close()
 
 	var products []models.Product
@@ -75,10 +72,9 @@ func GetProducts(c *gin.Context) {
 			continue
 		}
 
+		// 🔥 LOAD IMAGES
 		imageRows, _ := config.DB.Query(`
-		SELECT image_url
-		FROM product_images
-		WHERE product_id=$1
+			SELECT image_url FROM product_images WHERE product_id=$1
 		`, product.ID)
 
 		var images []string
@@ -88,6 +84,7 @@ func GetProducts(c *gin.Context) {
 			imageRows.Scan(&url)
 			images = append(images, url)
 		}
+
 		product.Images = images
 		products = append(products, product)
 	}
@@ -97,59 +94,7 @@ func GetProducts(c *gin.Context) {
 	})
 }
 
-func UpdateProduct(c *gin.Context) {
-
-	id := c.Param("id")
-
-	var product models.Product
-
-	if err := c.ShouldBindJSON(&product); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid input"})
-		return
-	}
-	query := `
-	UPDATE products
-	SET name=$1,description=$2,price=$3,category_id=$4,stock=$5
-	WHERE id=$6
-	`
-
-	_, err := config.DB.Exec(
-		query,
-		product.Name,
-		product.Description,
-		product.Price,
-		product.CategoryID,
-		product.Stock,
-		id,
-	)
-
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to update product"})
-		return
-	}
-
-	c.JSON(200, gin.H{"message": "Product updated"})
-}
-
-func DeleteProduct(c *gin.Context) {
-
-	id := c.Param("id")
-
-	query := `
-	DELETE FROM products
-	WHERE id=$1
-	`
-
-	_, err := config.DB.Exec(query, id)
-
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to delete product"})
-		return
-	}
-
-	c.JSON(200, gin.H{"message": "Product deleted"})
-}
-
+// ✅ GET PRODUCT BY ID
 func GetProductByID(c *gin.Context) {
 
 	id := c.Param("id")
@@ -176,9 +121,27 @@ func GetProductByID(c *gin.Context) {
 		return
 	}
 
-	c.JSON(200, gin.H{"data": product})
+	// 🔥 LOAD IMAGES
+	imageRows, _ := config.DB.Query(`
+		SELECT image_url FROM product_images WHERE product_id=$1
+	`, product.ID)
+
+	var images []string
+
+	for imageRows.Next() {
+		var url string
+		imageRows.Scan(&url)
+		images = append(images, url)
+	}
+
+	product.Images = images
+
+	c.JSON(200, gin.H{
+		"data": product,
+	})
 }
 
+// ✅ ADD IMAGE
 func AddProductImage(c *gin.Context) {
 
 	idParam := c.Param("id")
@@ -189,12 +152,26 @@ func AddProductImage(c *gin.Context) {
 		return
 	}
 
-	var image models.ProductImage
-
-	if err := c.ShouldBindJSON(&image); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid input"})
+	file, err := c.FormFile("image")
+	if err != nil {
+		c.JSON(400, gin.H{"error": "Image required"})
 		return
 	}
+
+	ext := filepath.Ext(file.Filename)
+	fileName := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+
+	filePath := "uploads/" + fileName
+
+	err = c.SaveUploadedFile(file, filePath)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to save image"})
+		return
+	}
+
+	imageURL := "/uploads/" + fileName
+
+	var imageID int
 
 	query := `
 	INSERT INTO product_images (product_id,image_url)
@@ -202,23 +179,14 @@ func AddProductImage(c *gin.Context) {
 	RETURNING id
 	`
 
-	err = config.DB.QueryRow(
-		query,
-		productID,
-		image.ImageURL,
-	).Scan(&image.ID)
-
+	err = config.DB.QueryRow(query, productID, imageURL).Scan(&imageID)
 	if err != nil {
-		c.JSON(500, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
-	image.ProductID = productID
-
 	c.JSON(201, gin.H{
-		"message": "Image added",
-		"data":    image,
+		"message": "Image uploaded",
+		"image":   imageURL,
 	})
 }
